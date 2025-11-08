@@ -1,1025 +1,510 @@
-# Documentation Technique Complète - Plateforme Resa en Direct
+# Documentation Technique Complète - IMMOSTRASBOURG
 
-## 1. Vision du Projet
-
-### Objectif Commercial
-Créer une plateforme de réservation directe (resa-en-direct.fr) permettant au propriétaire de louer 6-10 appartements en courte durée sans passer par Booking ou Airbnb, économisant ainsi les frais de commission (typiquement 15-20%).
-
-### Spécifications Métier
-- **Nombre d'apartements** : 6 à 10 initialement
-- **Utilisateurs simultanés** : ~500 max
-- **Réservations prévues** : ~60 par mois
-- **Synchronisation calendaire** : 3 sources (Booking, Airbnb, site direct)
-- **Paiements acceptés** : Carte bancaire (Stripe), virement bancaire, espèces
-- **Annulation** : Gratuite jusqu'à 2 jours avant check-in
-- **Dépôt de garantie** : 15% du prix total (ajustable)
-- **Communications clients** : Email, WhatsApp (clients étrangers)
-- **Taxes/TVA** : Calcul standard à ajouter au prix (ajustable)
-- **Langues** : Français + multilingue (via traducteur navigateur ou i18n futur)
-- **Disponibilités** : Import iCal depuis Booking et Airbnb (flux unidirectionnel pour MVP)
-
-### MVP (Minimum Viable Product)
-Phase 1 prioritaire : vitrine + calendrier de disponibilités + formulaire de réservation simple + numéro WhatsApp pour confirmer
+**Dernière mise à jour :** 09 novembre 2025  
+**Statut du projet :** En développement - Phase 2 (Frontend)  
+**Backend :** Fonctionnel sur http://localhost:5000/
 
 ---
 
-## 2. Architecture Générale
+## 📋 Table des matières
 
-### Philosophie d'Architecture
-- **Hexagonale** : Séparation claire entre couches HTTP, métier, données, infra
-- **Domaine** : Groupement par entités (users, properties, bookings, calendars, availability)
-- **Scalabilité** : Redis pour locks/cache, Prisma pour queries optimisées
-- **Sécurité** : JWT + roles, validation stricte, hashage bcrypt, secrets en env vars
-- **Observabilité** : Logs structurés (pino), possibilité OpenTelemetry futur
-
-### Stack Technologique
-
-#### Infrastructure & Hébergement
-| Composant | Technologie | Justification | Coût |
-|-----------|-------------|---------------|------|
-| Frontend Hosting | Vercel | Auto-déploiement GitHub, CDN global, gratuit tier | Gratuit/Pro |
-| Backend Hosting | Railway | Déploiement simple, PostgreSQL managée, gratuit tier | ~$7-20/mois |
-| Base de données | PostgreSQL 15+ | Fiable, ACID, full-text search, JSONB | Inclus Railway |
-| Cache/Locks | Redis | Verrous de disponibilité, cache session | Optionnel (~$7/mois) |
-| Domaine | OVH | Registrar FR, support FR, bon marché | ~12€/an |
-| Email SMTP | Gmail API | Gratuit, intégration simple Nodemailer | Gratuit |
-| SMS/WhatsApp | Twilio (optionnel MVP) | API flexible, pricing à l'usage | ~0,02€ par message |
-
-#### Backend - Stack Node.js
-| Composant | Package | Version | Justification |
-|-----------|---------|---------|---------------|
-| Runtime | Node.js | v18+ LTS | Support long terme, perf |
-| Framework HTTP | express | ^4.18 | Industry standard, middleware rich |
-| ORM | @prisma/client | ^5.0 | Type-safe, migrations, seed |
-| DB Client | pg | ^8.11 | Driver PostgreSQL natif |
-| Authentification | jsonwebtoken | ^9.0 | JWT standard, refresh flow |
-| Hash Mot de passe | bcryptjs | ^2.4 | OWASP compliant |
-| Validation | zod | ^3.22 | TypeScript-first, schemas |
-| Email | nodemailer | ^6.9 | Multi-transport, SMTP |
-| iCal Parsing | ical.js | ^2.0 | Parse/generate iCal RFC 5545 |
-| Planification | node-cron | ^3.0 | Sync iCal périodique |
-| Queue (opt) | bull | ^4.11 | BullMQ pour jobs async |
-| Redis (opt) | redis | ^4.6 | Client Redis |
-| Sécurité HTTP | helmet | ^7.0 | Security headers |
-| CORS | cors | ^2.8 | Contrôle CORS |
-| Logging | pino | ^8.14 | Structured logs |
-| Validation env | dotenv | ^16.0 | Variables d'environnement |
-| Admin Panel (opt) | @adminjs/express | ^6.0 | Dashboard admin auto-généré |
-| Documentation | swagger-ui-express | ^4.6 | Swagger/OpenAPI UI |
-
-#### Frontend - Stack React
-| Composant | Package | Version | Justification |
-|-----------|---------|---------|---------------|
-| Build Tool | Vite | ^5.0 | Instant HMR, optimisation ES |
-| Framework | react | ^18.2 | Hooks, context, perf |
-| Routing | react-router-dom | ^6.0 | SPA routing standard |
-| Styling | tailwindcss | ^3.3 | Utility-first, responsive |
-| UI Components | headlessui | ^1.7 | Unstyled accessible components |
-| State Management | zustand | ^4.4 | Lightweight, non-intrusive |
-| Server State | @tanstack/react-query | ^5.0 | Cache, sync, fetch management |
-| Forms | react-hook-form | ^7.4 | Lightweight, performance |
-| Validation | zod | ^3.22 | Schemas côté client |
-| Calendar | react-big-calendar | ^1.8 | Affichage calendrier |
-| Date Utils | date-fns | ^2.30 | Manipulation dates |
-| HTTP Client | axios | ^1.5 | Promise-based, interceptors |
-| Icons | react-icons | ^4.11 | Icon library diverse |
-| Image Gallery | react-image-gallery | ^1.2 | Galerie responsive |
-| Maps (opt) | react-leaflet | ^4.2 | Maps interactives |
-| Modal | react-modal | ^3.16 | Modales accessible |
-| Loading | react-spinners | ^0.13 | Spinners/loaders |
-| i18n (optionnel) | i18next | ^23.0 | Internationalisation |
-| Testing | vitest, @testing-library | ^1.0 | Unit/component tests |
+1. [Vue d'ensemble du projet](#vue-densemble)
+2. [Informations sur l'entreprise](#informations-entreprise)
+3. [Catalogue des appartements](#catalogue-appartements)
+4. [Architecture technique](#architecture-technique)
+5. [Spécifications Frontend](#frontend)
+6. [Spécifications Backend](#backend)
+7. [Fonctionnalités prioritaires](#priorités)
+8. [Politique de réservation](#politique)
 
 ---
 
-## 3. Modèle de Données - Détails Prisma
+## Vue d'ensemble
 
-### Users (Authentification & Autorisation)
-```prisma
-model User {
-  id              String    @id @default(cuid())
-  email           String    @unique
-  passwordHash    String
-  firstName       String?
-  lastName        String?
-  phone           String?
-  role            UserRole  @default(USER) // USER, MANAGER, ADMIN
-  properties      Property[]
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
-  refreshTokens   RefreshToken[]
-}
+### 🎯 Objectif principal
 
-enum UserRole {
-  USER
-  MANAGER
-  ADMIN
-}
+Créer une **plateforme de réservation d'appartements en ligne** permettant à DIMO (marque IMMOSTRASBOURG) de gérer directement les réservations de ses 5 appartements situés à Strasbourg, sans passer par Airbnb ou Booking pour éviter les frais de commission.
 
-model RefreshToken {
-  id        String   @id @default(cuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  token     String   @unique
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-}
-```
+### ✨ Avantages pour les clients
 
-### Properties & Units (Bien Immobilier)
-```prisma
-model Property {
-  id           String    @id @default(cuid())
-  ownerId      String
-  owner        User      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
-  name         String
-  description  String?
-  address      String
-  city         String
-  zipCode      String
-  country      String
-  latitude     Float?
-  longitude    Float?
-  photos       Photo[]
-  units        Unit[]
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
-}
+La plateforme affichera le message : **"Réservez directement et économisez ! Les tarifs directs sont plus avantageux que via Airbnb ou Booking"**
 
-model Photo {
-  id         String   @id @default(cuid())
-  propertyId String
-  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  url        String
-  altText    String?
-  order      Int      @default(0)
-}
+### 🔄 Synchronisation multi-plateformes
 
-model Unit {
-  id              String          @id @default(cuid())
-  propertyId      String
-  property        Property        @relation(fields: [propertyId], references: [id], onDelete: Cascade)
-  name            String          // "Appart T2", "Studio", etc.
-  capacity        Int             // nb personnes max
-  bedrooms        Int
-  bathrooms       Int
-  amenities       String[]        // @db.Text
-  description     String?
-  
-  // Tarification
-  basePrice       Float           // € par nuit
-  currency        String          @default("EUR")
-  
-  // Règles
-  minStay         Int             @default(1)
-  maxStay         Int?
-  checkInTime     String          @default("15:00")
-  checkOutTime    String          @default("11:00")
-  
-  // Données
-  bookings        Booking[]
-  availability    Availability[]
-  rates           Rate[]
-  calendarFeeds   CalendarFeed[]
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-}
-```
-
-### Tarification (Pricing & Rates)
-```prisma
-model Rate {
-  id      String   @id @default(cuid())
-  unitId  String
-  unit    Unit     @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  date    DateTime @db.Date
-  price   Float    // EUR
-  
-  // Règles spéciales
-  minStay Int?
-  maxStay Int?
-  
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  
-  @@unique([unitId, date])
-  @@index([unitId, date])
-}
-```
-
-### Disponibilités (Inventory)
-```prisma
-model Availability {
-  id        String     @id @default(cuid())
-  unitId    String
-  unit      Unit       @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  date      DateTime   @db.Date
-  status    AvailStatus @default(OPEN)
-  
-  // Metadata
-  source    String?    // "internal", "booking", "airbnb"
-  
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  
-  @@unique([unitId, date])
-  @@index([unitId, date, status])
-}
-
-enum AvailStatus {
-  OPEN      // Disponible
-  CLOSED    // Bloqué (sync externe ou owner)
-  BLOCKED   // Bloqué intentionnellement
-}
-```
-
-### Réservations (Bookings)
-```prisma
-model Booking {
-  id              String       @id @default(cuid())
-  unitId          String
-  unit            Unit         @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  
-  // Dates
-  checkIn         DateTime     @db.Date
-  checkOut        DateTime     @db.Date
-  
-  // Guest
-  guestName       String
-  guestEmail      String
-  guestPhone      String
-  guests          Int
-  
-  // Pricing
-  pricePerNight   Float
-  nbNights        Int
-  subtotal        Float        // (nbNights * price)
-  depositAmount   Float        // 15% de subtotal
-  taxAmount       Float
-  totalPrice      Float
-  currency        String       @default("EUR")
-  
-  // Statut
-  status          BookingStatus @default(PENDING)
-  paymentStatus   PaymentStatus @default(PENDING)
-  paymentMethod   PaymentMethod @default(CASH) // CARD, WIRE, CASH
-  
-  // Metadata
-  notes           String?
-  externalRef     String?      // ref Booking/Airbnb si sync
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
-  
-  @@index([unitId, checkIn, checkOut])
-  @@index([status, paymentStatus])
-}
-
-enum BookingStatus {
-  PENDING           // En attente de paiement/confirmation
-  CONFIRMED         // Confirmée
-  CHECKED_IN        // Client arrivé
-  COMPLETED         // Réservation terminée
-  CANCELLED         // Annulée
-}
-
-enum PaymentStatus {
-  PENDING
-  PROCESSING
-  COMPLETED
-  FAILED
-  REFUNDED
-}
-
-enum PaymentMethod {
-  CARD      // Stripe
-  WIRE      // Virement bancaire
-  CASH      // Espèces
-}
-```
-
-### Synchronisation iCal (Calendar Sync)
-```prisma
-model CalendarFeed {
-  id         String        @id @default(cuid())
-  unitId     String
-  unit       Unit          @relation(fields: [unitId], references: [id], onDelete: Cascade)
-  
-  direction  FeedDirection // IMPORT ou EXPORT
-  url        String?       // URL iCal (si IMPORT)
-  token      String?       // Token d'auth si besoin
-  
-  source     String?       // "booking.com", "airbnb.com", "direct"
-  
-  lastSyncAt DateTime?
-  status     SyncStatus    @default(PENDING)
-  
-  events     CalendarEvent[]
-  
-  createdAt  DateTime      @default(now())
-  updatedAt  DateTime      @updatedAt
-}
-
-enum FeedDirection {
-  IMPORT    // Pull depuis Booking/Airbnb
-  EXPORT    // Publish notre flux
-}
-
-enum SyncStatus {
-  PENDING
-  SYNCING
-  SUCCESS
-  ERROR
-}
-
-model CalendarEvent {
-  id        String        @id @default(cuid())
-  feedId    String
-  feed      CalendarFeed  @relation(fields: [feedId], references: [id], onDelete: Cascade)
-  
-  uid       String        // Unique ID iCal
-  summary   String        // Description de l'événement
-  
-  dtStart   DateTime      // Format ISO UTC
-  dtEnd     DateTime
-  
-  // Tentative de matching booking
-  bookingId String?
-  booking   Booking?      @relation(fields: [bookingId], references: [id], onDelete: SetNull)
-  
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  
-  @@unique([feedId, uid])
-}
-
-model Booking {
-  // ... autres champs ...
-  calendarEvents CalendarEvent[]
-}
-```
+Le système doit synchroniser les disponibilités avec :
+- **Airbnb** (import/export calendrier)
+- **Booking.com** (import/export calendrier)
+- **LeBonCoin** (pour référence)
 
 ---
 
-## 4. Architecture des Services Backend
+## 📌 Informations Entreprise
 
-### Domaines & Packages
-```
-backend/src/
-├── controllers/
-│   ├── authController.js
-│   ├── propertyController.js
-│   ├── bookingController.js
-│   ├── calendarController.js
-│   ├── healthController.js
-│   └── adminController.js
-├── routes/
-│   ├── auth.js
-│   ├── properties.js
-│   ├── bookings.js
-│   ├── calendars.js
-│   └── admin.js
-├── services/
-│   ├── authService.js
-│   ├── propertyService.js
-│   ├── bookingService.js
-│   ├── availabilityService.js
-│   ├── calendarSyncService.js
-│   ├── pricingService.js
-│   ├── emailService.js
-│   └── paymentService.js
-├── middleware/
-│   ├── auth.js (JWT verification)
-│   ├── errorHandler.js
-│   ├── validation.js (Zod)
-│   └── logging.js
-├── utils/
-│   ├── ical.js (parse/generate iCal)
-│   ├── dateHelpers.js
-│   ├── constants.js
-│   └── validators.js
-├── prisma/
-│   ├── schema.prisma
-│   └── seed.js
-├── jobs/
-│   ├── syncCalendarJob.js (cron/queue)
-│   └── emailJob.js
-├── app.js (Express app setup)
-└── index.js (entry point)
-```
+| Information | Valeur |
+|---|---|
+| **Raison sociale** | DIMO |
+| **Marque commerciale** | IMMOSTRASBOURG |
+| **SIRET** | 881304562 |
+| **Email** | dimolocation@gmail.com |
+| **Téléphone** | +33 7 62 14 48 81 |
+| **Localisation** | Strasbourg (Grand Est, France) |
+| **Logo** | https://immostrasbourg.com/assets/logo_v-9otjQWd0.jpg |
 
-### Services Clés
+### À propos
 
-#### CalendarSyncService
-- **Fonction** : Synchroniser iCal depuis Booking/Airbnb toutes les 15 min
-- **Logique** :
-  1. Fetch URL iCal du feed
-  2. Parse iCal.js → liste d'événements {uid, dtStart, dtEnd, summary}
-  3. Normaliser dates en UTC
-  4. Déduire nuits fermées (CLOSED) en Availability
-  5. Upsert CalendarEvent par uid
-  6. Mettre à jour lastSyncAt
-  7. Log erreurs, métriques
-- **Sécurité** : Whitelisting URLs http/https, timeout, max size .ics
-- **Gestion de conflits** : Bookings CONFIRMED internes conservent priorité
-
-#### BookingService
-- **Quote** : POST /api/bookings/quote
-  - Input : {unitId, checkIn, checkOut, guests}
-  - Output : {priceBreakdown, total, currency, policies}
-  - Calcul : base price * nuits + taxes + dépôt de garantie
-- **Create** : POST /api/bookings
-  - Prend verrou Redis sur [unitId, checkIn, checkOut]
-  - Vérifie pas de chevauchement Booking existant
-  - Crée Booking status=PENDING
-  - Envoie email de confirmation
-  - Relâche verrou
-- **Cancel** : PATCH /api/bookings/:id/cancel
-  - Vérifie date annulation (2j avant check-in)
-  - Status → CANCELLED
-  - Libère nuits en Availability
-
-#### AvailabilityService
-- **getAvailability** : GET /api/units/:id/availability?from=...&to=...
-  - Cherche toutes Availability + Rate pour période
-  - Applique règles : status=OPEN && minStay/maxStay
-  - Retourne calendrier (jour à jour, prix)
-- **updateBatch** : PUT /api/units/:id/availability
-  - Bulk update Availability (status, minStay, maxStay)
-
-#### PricingService
-- **calculatePrice** : Calcul complet du prix
-  - Base price × nbNights
-  - + taxes (TVA standard)
-  - + dépôt garantie 15%
-  - − réductions éventuelles (early bird, long stay)
-
-#### EmailService
-- **confirmationEmail** : Booking confirmée
-- **reminderEmail** : 1j avant check-in
-- **cancelEmail** : Confirmation annulation
-- Utilise Nodemailer + Gmail SMTP
+**Texte de présentation suggéré :**  
+IMMOSTRASBOURG offre une sélection d'appartements haut de gamme dans le quartier de l'Orangerie et Koenigshoeffen à Strasbourg. Réservez directement auprès de nous pour bénéficier de meilleurs tarifs et d'un service client personnalisé. Nos appartements sont entièrement équipés et idéalement situés à proximité du centre-ville, des institutions européennes et des transports en commun.
 
 ---
 
-## 5. Endpoints REST API
+## 🏠 Catalogue des appartements
+
+Tous les appartements sont situés à : **40 route des Romaines, 67200 STRASBOURG**
+
+### Appartement 1 : "0G"
+
+| Propriété | Détail |
+|---|---|
+| **Référence interne** | 0G |
+| **Code Airbnb** | 53765981 |
+| **Titre** | Logement classé + garage - proche centre |
+| **Localisation** | Résidence Romains - Rez-de-chaussée (RDCH) |
+| **Capacité** | 4 voyageurs max |
+| **Chambres** | 2 chambres |
+| **Lits** | 2 lits (1 double + 1 canapé convertible) |
+| **Salles de bain** | 1 salle de bain |
+| **Surface** | Non spécifiée |
+| **Aménagement** | Grand salon, salle à manger, cuisine avec table de bar, chambre, douche italienne, WC |
+| **Équipements clés** | WiFi, TV HD 43", garage privatif gratuit, lave-linge gratuit, climatisation, lit bébé, lit parapluie, chaise haute |
+| **Parking** | Garage résidentiel privatif gratuit |
+| **Proximité transport** | 10 min de la gare, 2 min arrêt tram F "Comptes" |
+| **Points forts** | Résidence calme, garage privatif, proximité tram et centre-ville |
+| **Arrivée** | Entre 16h00 et 20h00 |
+| **Départ** | Avant 11h00 |
+| **Classification** | 3 étoiles (ministère du tourisme) |
+| **Note Airbnb** | 4,57/5 (30 avis) |
+| **Lien Airbnb** | https://www.airbnb.fr/rooms/53765981 |
+
+**Équipements complets :** Cuisine, WiFi, garage gratuit, TV HD, lave-linge gratuit, climatisation, lit bébé, lit parapluie, chaise haute, cafetière filtre, réfrigérateur, four micro-ondes, sèche-cheveux, détecteur de fumée (51 équipements au total)
+
+---
+
+### Appartement 2 : "1G"
+
+| Propriété | Détail |
+|---|---|
+| **Référence interne** | 1G |
+| **Code Airbnb** | 596901901780994599 |
+| **Titre** | Logement classé + garage - proche centre |
+| **Localisation** | Résidence Romains - 1er étage gauche |
+| **Capacité** | 4 voyageurs max |
+| **Chambres** | 2 chambres |
+| **Lits** | 2 lits (1 double + 1 canapé convertible) |
+| **Salles de bain** | 1 salle de bain |
+| **Surface** | Non spécifiée |
+| **Aménagement** | Grand salon, salle à manger, cuisine avec table de bar, chambre, douche italienne, WC |
+| **Équipements clés** | WiFi, TV HD 43", garage privatif gratuit, lave-linge gratuit, climatisation centrale |
+| **Parking** | Garage fermé privatif |
+| **Proximité transport** | 10 min de la gare, 2 min arrêt tram F "Comptes" |
+| **Points forts** | Résidence calme, garage fermé, proximité tram et centre-ville |
+| **Arrivée** | Entre 16h00 et 21h00 |
+| **Départ** | Avant 11h00 |
+| **Note Airbnb** | 4,52/5 (29 avis) |
+| **Lien Airbnb** | https://www.airbnb.fr/rooms/596901901780994599 |
+
+**Équipements complets :** Vue cour/jardin, cuisine, WiFi, parking gratuit, TV HD, lave-linge gratuit, climatisation, lit bébé, caméras de surveillance extérieures (27 équipements au total)
+
+**À noter :** Interdiction de fumer/vapoter, pas de fête/soirée, interdiction du protoxyde d'azote
+
+---
+
+### Appartement 3 : "22RMA"
+
+| Propriété | Détail |
+|---|---|
+| **Référence interne** | 22RMA |
+| **Code Airbnb** | 1050048649889366864 |
+| **Titre** | Logement classé + parking - proche tram F |
+| **Localisation** | Quartier résidentiel (construction en prolongation villa) |
+| **Capacité** | 4 voyageurs max |
+| **Chambres** | 1 chambre |
+| **Lits** | 1 lit double |
+| **Salles de bain** | 1 salle de bain |
+| **Surface** | Non spécifiée |
+| **Aménagement** | Logement élégant partiellement en pente, douche italienne, cuisine équipée, lave-linge, table et chaises de bar, petite terrasse, parking privatif |
+| **Équipements clés** | WiFi, cuisine, parking gratuit sur place, TV, lave-linge, climatisation, terrasse |
+| **Parking** | Parking privatif gratuit |
+| **Proximité transport** | Proche tram F |
+| **Points forts** | Résidence calme, prestations haute de gamme, parking privatif, terrasse |
+| **Arrivée** | À partir de 16h00 |
+| **Départ** | Avant 11h00 |
+| **Note Airbnb** | 4,9/5 (10 avis) - Coup de cœur voyageurs |
+| **Lien Airbnb** | https://www.airbnb.fr/rooms/1050048649889366864 |
+
+**Équipements complets :** Cuisine, WiFi, parking gratuit, TV, lave-linge, climatisation, lit parapluie sur demande, sèche-cheveux, réfrigérateur (42 équipements au total)
+
+---
+
+### Appartement 4 : "1A"
+
+| Propriété | Détail |
+|---|---|
+| **Référence interne** | 1A |
+| **Code Airbnb** | 1108488068701410163 |
+| **Titre** | Studio moderne - 1A Logement classé proche centre ville et CE |
+| **Localisation** | Quartier Orangerie, 1er étage |
+| **Capacité** | 2 voyageurs max |
+| **Chambres** | 1 chambre |
+| **Lits** | 1 lit double |
+| **Salles de bain** | 1 salle de bain |
+| **Surface** | Non spécifiée |
+| **Aménagement** | Studio moderne, prestations haute de gamme : douche italienne en marbre, cuisine équipée avec crédence en marbre |
+| **Équipements clés** | WiFi, TV HD 43", lave-linge gratuit, ascenseur, sèche-cheveux, réfrigérateur, four micro-ondes |
+| **Parking** | Stationnement payant dans la rue |
+| **Proximité transport** | 15 min à pied centre-ville, 15 min institutions européennes, 20 min bus gare |
+| **Points forts** | Proximité centre et institutions européennes, immeuble bourgeois, prestations haute de gamme |
+| **Arrivée** | À partir de 16h00 |
+| **Départ** | Avant 11h00 |
+| **Note Airbnb** | 4,6/5 (5 avis) |
+| **Lien Airbnb** | https://www.airbnb.fr/rooms/1108488068701410163 |
+
+**Équipements complets :** Cuisine, WiFi, TV HD, ascenseur, lave-linge gratuit, sèche-cheveux, réfrigérateur, four micro-ondes, cafetière manuelle, séjours longue durée autorisés, stationnement payant rue (44 équipements au total)
+
+---
+
+### Appartement 5 : "1B"
+
+| Propriété | Détail |
+|---|---|
+| **Référence interne** | 1B |
+| **Code Airbnb** | 1108086655734026184 |
+| **Titre** | Studio Immostrasbourg 1B proche centre ville et CE |
+| **Localisation** | Quartier Orangerie, 1er étage |
+| **Capacité** | 2 voyageurs max |
+| **Chambres** | 1 chambre |
+| **Lits** | 1 lit double |
+| **Salles de bain** | 1,5 salles de bain |
+| **Surface** | Non spécifiée |
+| **Aménagement** | Studio moderne, prestations haute de gamme : douche italienne en marbre, cuisine équipée avec crédence en marbre |
+| **Équipements clés** | WiFi, TV HD 43", lave-linge gratuit, ascenseur, sèche-cheveux, réfrigérateur, four micro-ondes |
+| **Parking** | Pas de parking fourni (centre-ville) |
+| **Proximité transport** | 15 min à pied centre-ville, 15 min institutions européennes, 20 min bus gare |
+| **Points forts** | Proximité centre et institutions européennes, immeuble bourgeois, prestations haute de gamme |
+| **Arrivée** | Entre 16h00 et 21h00 |
+| **Départ** | Avant 11h00 |
+| **Note Airbnb** | 4,25/5 (4 avis) |
+| **Lien Airbnb** | https://www.airbnb.fr/rooms/1108086655734026184 |
+
+**Équipements complets :** Cuisine, WiFi, TV HD, ascenseur, lave-linge gratuit, sèche-cheveux, réfrigérateur, four micro-ondes, séjours longue durée autorisés (46 équipements au total)
+
+---
+
+## 🏗️ Architecture technique
+
+### Stack technologique recommandé
+
+| Couche | Technologie | Statut |
+|---|---|---|
+| **Backend** | Node.js + Express | ✅ Fonctionnel |
+| **Base de données** | PostgreSQL | ✅ Configurée |
+| **Frontend** | React / Next.js | 🔄 À développer |
+| **API** | REST | ✅ Existante |
+| **Authentification** | JWT | ✅ Implémentée |
+| **Paiement** | Stripe | 🔄 À intégrer |
+| **Synchronisation iCal** | Librairie iCalendar | 🔄 À développer |
+
+### Infrastructure
+
+- **Backend :** http://localhost:5000 (développement)
+- **Base de données :** PostgreSQL local
+- **Frontend :** À déployer (Vercel ou Railway recommandé)
+- **Hébergement futur :** Scalable sur cloud (OVH, AWS, etc.)
+
+---
+
+## 💻 Spécifications Frontend (Phase 2)
+
+### 1. Pages essentielles (Phase 2 - Prioritaire)
+
+#### Page d'accueil
+- **Objectif :** Présenter IMMOSTRASBOURG et la liste des appartements
+- **Éléments :**
+  - Logo et tagline "Réservez directement et économisez !"
+  - Présentation courte de l'entreprise
+  - Galerie des 5 appartements avec photos, prix/nuit, capacité
+  - Moteur de recherche : dates + nombre de personnes
+  - Lien "À propos" et "Contact"
+
+#### Page détail d'un appartement
+- **Contenu :**
+  - Galerie photos (max 25 images)
+  - Titre, localisation, note Airbnb
+  - Nombre de chambres, lits, capacité max
+  - Description détaillée
+  - Équipements/services
+  - Localisation sur carte
+  - Calendrier de disponibilité
+  - Avis clients
+  - **Bouton "Réserver maintenant"** → page réservation
+
+#### Page de réservation
+- **Étapes du processus :**
+  1. Confirmation des dates (calendrier)
+  2. Nombre d'adultes et enfants
+  3. Résumé tarifaire (détail des frais) :
+     - Prix de base (X nuits)
+     - Frais de séjour (40€ si configuré)
+     - Taxe de séjour (% sur les adultes)
+     - **Total**
+  4. Formulaire client :
+     - Nom, prénom
+     - Email
+     - Numéro WhatsApp (pour notifications)
+     - Adresse
+  5. Condition d'annulation affichée
+  6. **Paiement :** Acompte (10% par défaut) + empreinte carte
+  7. Confirmation de réservation
+
+#### Pages secondaires (Phase 3)
+
+- **À propos :** Présentation détaillée de DIMO/IMMOSTRASBOURG
+- **Contact :** Formulaire de contact + infos (email, téléphone, adresse)
+- **Mentions légales :** DIMO - SIRET 881304562 - dimolocation@gmail.com
+- **Conditions générales de vente**
+- **Politique de confidentialité**
+
+### 2. Design et styles
+
+- **Couleurs :** Bleu harmonisé avec le logo (couleur principale)
+- **Style :** Moderne, minimaliste, simple et efficace
+- **Logo :** À utiliser depuis https://immostrasbourg.com/assets/logo_v-9otjQWd0.jpg
+- **Responsive :** Compatible mobile, tablette, desktop
+- **Inspiration :** UI épurée, focus sur la lisibilité et facilité de navigation
+
+---
+
+## 🔧 Dashboard Admin (Spécifications détaillées)
 
 ### Authentification
-```
-POST   /api/auth/register
-Body:  { email, password, firstName?, lastName? }
-Response: { data: { user, token, refreshToken } }
+- Login sécurisé avec email/mot de passe
+- Session persistante
 
-POST   /api/auth/login
-Body:  { email, password }
-Response: { data: { user, token, refreshToken } }
+### 1. Gestion des prix
 
-POST   /api/auth/refresh
-Body:  { refreshToken }
-Response: { data: { token } }
+#### Vue d'ensemble
+- Tableau listant les 5 appartements
+- Pour chaque appartement : affichage prix standard actuel
 
-POST   /api/auth/logout
-Response: { data: {} }
-```
+#### Modification des prix par calendrier
+- **Sélection d'dates :** Mini-calendrier pour choisir plage de dates
+- **Types de tarifs :** 3 options configurables pour chaque date :
+  - ✅ **Tarif standard** (remboursable si annulation)
+  - ✅ **Tarif semaine** (réduction pour 7+ nuits)
+  - ✅ **Tarif non-remboursable** (pas d'annulation possible)
+- **Tarif de référence :** Champ configurable par appartement = tarif par défaut appliqué partout
+- **Action en masse :** Pouvoir modifier plusieurs appartements à la fois
 
-### Propriétés
-```
-GET    /api/properties                (publique)
-GET    /api/properties/:id            (publique)
-POST   /api/properties                (authentifié, MANAGER+)
-PATCH  /api/properties/:id            (owner ou ADMIN)
+#### Frais de séjour
+- **Configuration :** Section dédiée
+- **Montant :** 40€ par défaut (modifiable)
+- **Applicabilité :** 1 fois par séjour, quelque soit la durée
+- **Action en masse :** Modifier pour plusieurs appartements simultanément
 
-GET    /api/properties/:id/units      (publique)
-POST   /api/properties/:id/units      (owner ou ADMIN)
-GET    /api/units/:id                 (publique)
-PATCH  /api/units/:id                 (owner ou ADMIN)
-```
+#### Taxe de séjour
+- **Configuration :** Section spécifique par appartement
+- **Expression :** En pourcentage (%) du prix total
+- **Application :** Uniquement sur les adultes (pas les enfants)
+- **Affichage client :** Uniquement lors de la réservation
+- **Tableau de synthèse :** Vue du total des taxes collectées (obligation légale État)
+- **Action en masse :** Modifier pour plusieurs appartements à la fois
 
-### Disponibilités & Tarifs
-```
-GET    /api/units/:id/availability?from=YYYY-MM-DD&to=YYYY-MM-DD
-PUT    /api/units/:id/availability    (bulk update)
+### 2. Gestion des appartements
 
-GET    /api/units/:id/rates?from=...&to=...
-PUT    /api/units/:id/rates           (bulk update)
-```
+#### Modification des noms
+- Pouvoir renommer chaque appartement manuellement
 
-### Réservations
-```
-POST   /api/bookings/quote
-Body:  { unitId, checkIn, checkOut, guests }
-Response: { data: { priceBreakdown, total, currency, policies } }
+#### Création d'un nouvel appartement
+- **Champs requis :**
+  - Référence interne
+  - Titre de l'annonce
+  - Adresse
+  - Nombre de chambres
+  - Nombre de couchages (capacité max)
+  - Surface m²
+  - Description détaillée
+  - Équipements (checkboxes standards + champ libre)
+  - Photos (upload jusqu'à 25 images)
+  - Prix par nuit (tarif de base)
+  - Localisation GPS (latitude/longitude)
+  - Heure d'arrivée standard
+  - Heure de départ standard
 
-POST   /api/bookings
-Body:  { unitId, checkIn, checkOut, guests, guestInfo, paymentMethod? }
-Response: { data: { booking } }
+#### Configuration liens iCal
+- **Champs :**
+  - Lien iCal Airbnb (import)
+  - Lien iCal Booking (import)
+  - Bouton : Générer lien iCal interne (à transmettre à Airbnb/Booking)
+- **Synchronisation :** Vérifier disponibilités depuis ces liens
 
-GET    /api/bookings/:id              (authentifié)
-PATCH  /api/bookings/:id/cancel       (authentifié, client ou owner)
+### 3. Paramétrage des messages automatiques
 
-GET    /api/admin/bookings            (ADMIN+, paginated)
-PATCH  /api/admin/bookings/:id        (ADMIN+, forcer status)
-```
+#### Création de modèles de messages
+- **Type d'envoi :** Email + WhatsApp
+- **Champs du message :** Texte libre avec variables :
+  - {PRENOM_CLIENT}
+  - {EMAIL_CLIENT}
+  - {NUMERO_RESERVATION}
+  - {DATE_ARRIVEE}
+  - {DATE_DEPART}
+  - {NOM_APPARTEMENT}
+  - {PRIX_TOTAL}
 
-### Synchronisation iCal
-```
-POST   /api/calendar/feeds
-Body:  { unitId, direction: "IMPORT"|"EXPORT", url? }
-Response: { data: { feed } }
+#### Programmation d'envoi
+- **Moments disponibles :**
+  - À la confirmation de réservation
+  - 7 jours avant arrivée
+  - 1 jour avant arrivée
+  - Jour de l'arrivée
+  - Jour du départ
+  - X jours après départ (satisfaction)
+- **Personnalisation :** Créer plusieurs modèles pour différents moments
 
-GET    /api/calendar/feeds?unitId=...
-DELETE /api/calendar/feeds/:id
+### 4. Configuration annulation
 
-POST   /api/calendar/sync/:feedId     (sync manuel)
-GET    /api/calendar/export/:unitId.ics (flux public ICS)
-```
+- **Politique par défaut :** Celle de Booking (afficher texte pré-rempli modifiable)
+- **Délai de remboursement :** Configurable (ex: 14 jours)
+- **Conditions spéciales :** Champ libre pour conditions personnalisées
 
-### Admin
-```
-GET    /api/admin/dashboard           (stats: occupancy, revenue, etc.)
-GET    /api/admin/bookings?status=...&page=...
-PATCH  /api/admin/bookings/:id
-GET    /api/health                    (health check)
-```
+### 5. Configuration paiement
 
----
+#### Accompte
+- **Montant :** 10% par défaut (modifiable)
+- **Timing :** À la réservation
 
-## 6. Flux de Synchronisation iCal - Détail Complet
+#### Système de paiement par carte bancaire
+- **Process :**
+  1. Client entre ses coordonnées lors de la réservation
+  2. Enregistrement empreinte de la carte
+  3. Débit immédiat de l'acompte
+  4. Débit automatique du solde (total - acompte) à J+1 date de réservation
+  5. Débits sécurisés via **Stripe**
 
-### Import (Pull) - Toutes les 15 minutes
-```
-1. Récupérer URL iCal du feed (CalendarFeed.url)
-2. Télécharger .ics avec timeout 10s, max 5MB
-3. Parser ical.js → array VEVENT
-4. Pour chaque événement:
-   a. Extraire: uid, dtStart (UTC), dtEnd (UTC), summary
-   b. Normaliser fuso horaire
-   c. Boucle dtStart → dtEnd (jour par jour):
-      - Créer/update Availability { unitId, date, status: CLOSED, source: "booking" }
-   d. Upsert CalendarEvent { feedId, uid, summary, dtStart, dtEnd }
-5. Mettre à jour CalendarFeed.lastSyncAt = now()
-6. Mettre à jour CalendarFeed.status = SUCCESS
-7. Si erreur: mettre à jour status = ERROR + log
-```
+#### Gestion caution
+- **Montant :** 500€ par défaut (modifiable par appartement)
+- **Déclenchement :** En cas de litiges/dégâts
+- **Litige (dispute):**
+  - Bouton "Déclencher un litige" dans la réservation
+  - Upload photos comme preuves
+  - Saisie du montant des dégâts demandé
+  - Validation = initié du paiement de la caution
+  - **Section "Litiges"** historique de tous les litiges + preuves photos
 
-### Export (Push) - À la demande + webhook
-```
-1. Récupérer tous les Bookings CONFIRMED du Unit
-2. Récupérer tous les blocs CLOSED du Unit
-3. Générer .ics avec ical.js:
-   - Header: PRODID, VERSION:2.0, CALSCALE:GREGORIAN
-   - Pour chaque Booking CONFIRMED:
-     * VEVENT uid=booking_{id}
-     * DTSTART: checkIn en UTC
-     * DTEND: checkOut en UTC
-     * SUMMARY: "Réservation {guestName}"
-   - Pour chaque CLOSED:
-     * VEVENT uid=closed_{date}
-     * DTSTART/DTEND: date en UTC
-     * SUMMARY: "Bloqué"
-4. Signer le flux avec token (query ?token=...)
-5. Retourner Content-Type: text/calendar
-```
+#### Compte bancaire Stripe
+- **Configuration :** Champ pour chaque appartement
+- **Info :** IBAN/BIC ou connexion Stripe directe
+- **Autorisation :** Permettre virements automatiques sur le compte configuré
 
-### Gestion des Conflits
-- Un Booking CONFIRMED interne **ne sera jamais écrasé** par un import iCal
-- Un import iCal peut bloquer les nuits restantes sauf si Booking CONFIRMED
-- Priorité : CONFIRMED interne > CLOSED import > OPEN
-
----
-
-## 7. Sécurité - Détails
-
-### Authentification
-- JWT access token courte durée (15 min)
-- JWT refresh token longue durée (7j) en httpOnly cookie (ou localStorage)
-- Rotation refresh tokens : old token révoqué après utilisation
-- Rôles : USER, MANAGER (propriétaire), ADMIN
-
-### Validation
-- Tous les inputs validés avec Zod schemas
-- Emails validés (format RFC 5322 simple)
-- Dates validées (format ISO 8601)
-- Nombres positifs, strings nullables explicites
-- Trim/sanitize strings
-
-### Protection Contre les Attaques
-- **CSRF** : Pas d'enjeu pour Bearer token JWT (API stateless)
-- **Rate Limiting** : 100 req/15min par IP, plus stricte pour auth (10 req/15min)
-- **CORS** : Whitelist originss http://localhost:3000 + domain resa-en-direct.fr
-- **Helmet** : Headers de sécurité (X-Frame-Options, CSP, etc.)
-- **SQL Injection** : N/A (Prisma parameterized queries)
-- **XSS** : N/A backend, validé frontend
-
-### Gestion des Secrets
-- Variables d'env jamais committées (.env dans .gitignore)
-- Utilisées via dotenv
-- Railway configure les secrets en env vars
-
-### Mot de Passe
-- Hashé avec bcryptjs (salt rounds=10)
-- Jamais stocké en clair
-- Jamais loggé
-
-### Verrous de Disponibilité
-- Redis SET NX PX (atomic check-and-set) pendant booking creation
-- Évite surbooking en cas de race condition
-- Clé format : `booking:lock:{unitId}:{checkIn}:{checkOut}`
-- TTL 30s
+### 6. Configuration arrivée/départ
+- **Heure d'arrivée :** Paramétrable par appartement (ex: 16h00)
+- **Heure de départ :** Paramétrable par appartement (ex: 11h00)
 
 ---
 
-## 8. Déploiement & Configuration
+## 🗄️ Spécifications Backend (Existant)
 
-### Variables d'Environnement Backend (.env)
-```
-# Database
-DATABASE_URL=postgresql://user:pass@host:port/db
+Le backend est déjà fonctionnel sur **http://localhost:5000**
 
-# JWT
-JWT_SECRET=your_secret_long_string_here
-JWT_REFRESH_SECRET=another_secret_long_string
-JWT_EXPIRE_IN=15m
-JWT_REFRESH_EXPIRE_IN=7d
+### API Endpoints principaux
 
-# Server
-NODE_ENV=development|production
-PORT=5000
-BASE_URL=http://localhost:5000 (ou https://resa-en-direct.fr)
+#### Appartements
+- `GET /api/apartments` → liste tous les appartements
+- `GET /api/apartments/:id` → détail d'un appartement
+- `POST /api/apartments` → créer (admin)
+- `PUT /api/apartments/:id` → modifier (admin)
 
-# Email SMTP
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=resaendirect@gmail.com
-SMTP_PASSWORD=your_gmail_app_password
-ADMIN_EMAIL=resaendirect@gmail.com
-MAIL_FROM_NAME=Resa en Direct
+#### Réservations
+- `POST /api/bookings` → créer une réservation
+- `GET /api/bookings/:id` → détail d'une réservation
+- `GET /api/bookings` → liste réservations (admin)
+- `PUT /api/bookings/:id` → modifier (admin)
 
-# WhatsApp/SMS (optionnel)
-TWILIO_ACCOUNT_SID=your_sid
-TWILIO_AUTH_TOKEN=your_token
-TWILIO_PHONE_NUMBER=+1234567890
+#### Disponibilités
+- `GET /api/availability/:apartmentId` → calendrier disponibilités
+- `POST /api/availability/sync` → sync iCal (Airbnb/Booking)
 
-# Payment (optionnel)
-STRIPE_SECRET_KEY=sk_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+#### Tarification
+- `GET /api/pricing/:apartmentId/:date` → prix pour date
+- `PUT /api/pricing` → modifier tarifs (admin)
 
-# iCal
-ICAL_SYNC_INTERVAL=15  # minutes
-ICAL_TIMEOUT=10000      # ms
-ICAL_MAX_SIZE=5242880   # bytes (5MB)
-ICS_TOKEN_SECRET=token_secret_for_export
-
-# Redis (optionnel)
-REDIS_URL=redis://localhost:6379
-
-# Logging
-LOG_LEVEL=debug|info|warn|error
-```
-
-### Déploiement Vercel (Frontend)
-1. Push code vers GitHub
-2. Connecter repo dans Vercel
-3. Configurer root directory: `./frontend`
-4. Variables d'env frontend :
-   ```
-   VITE_API_URL=https://api.resa-en-direct.fr
-   VITE_MAP_API_KEY=...
-   ```
-5. Deploy automatique à chaque push
-
-### Déploiement Railway (Backend)
-1. Créer projet Railway
-2. Ajouter PostgreSQL plugin
-3. Ajouter container Node.js
-4. Connecter repo GitHub
-5. Configurer variables d'env (copier du .env)
-6. Deploy automatique
-
-### DNS & Domaine (OVH)
-1. Enregistrer A record : resa-en-direct.fr → IP Vercel (ou CNAME)
-2. Enregistrer MX record pour Gmail
-3. Enregistrer TXT pour SPF/DKIM
-4. Attendre propagation DNS (~24h)
+#### Paiements
+- `POST /api/payments/deposit` → traiter acompte
+- `POST /api/payments/full` → traiter solde
+- `POST /api/disputes` → créer un litige
 
 ---
 
-## 9. Installation & Initialisation
+## ⭐ Fonctionnalités prioritaires
 
-### Prérequis
-- Node.js v18+ LTS
-- PostgreSQL v14+
-- Git
+### Phase 2 (Frontend) - ACTUELLE
+- ✅ Page d'accueil
+- ✅ Page détail appartement
+- ✅ Page réservation (formulaire + paiement)
+- ✅ Dashboard admin complet (tarifs, messages, etc.)
+- ✅ Synchronisation iCal
 
-### Setup Local (Voir backend/INSTALLATION.md)
-```bash
-# 1. Cloner repo
-git clone https://github.com/resaendirect-web/apartment-booking.git
-cd apartment-booking/backend
+### Phase 3 (Polish + Pages secondaires)
+- Pages "À propos", "Contact"
+- Conditions générales, Politique confidentialité
+- Intégration SMS (Twilio) pour WhatsApp
+- Analytics et reporting
+- Système de notation/avis clients
 
-# 2. Installer dépendances
-npm install
-
-# 3. Configurer .env (copier .env.example)
-cp .env.example .env
-# Éditer .env avec vos valeurs
-
-# 4. Setup DB
-npx prisma migrate dev --name init
-npx prisma db seed
-
-# 5. Lancer serveur dev
-npm run dev
-# Server sur http://localhost:5000
-```
-
-### Vérification
-- `GET http://localhost:5000/api/health` → OK
-- `POST http://localhost:5000/api/auth/register` → token reçu
+### Phase 4 (Optimisations)
+- Tests utilisateur
+- SEO & marketing
+- Multilingue (EN/DE)
+- Progressive Web App (PWA)
+- Intégration IA (chatbot support)
 
 ---
 
-## 10. Roadmap & Étapes Futures
+## 📋 Politique de réservation
 
-### Phase 2 (Court terme)
-- [ ] Compléter frontend (Search, Details, Booking, Admin dashboard)
-- [ ] Intégration Stripe paiements CB
-- [ ] Intégration Twilio WhatsApp notifications
-- [ ] Tests unitaires + e2e
-- [ ] Monitoring & alertes
+### Annulation
+Voir configuration Admin + capture d'écran fournie (par défaut : politique Booking)
 
-### Phase 3 (Moyen terme)
-- [ ] Webhooks OTA (Booking, Airbnb push)
-- [ ] Channel Manager (push vers autres OTA)
-- [ ] Règles tarifaires avancées (séjour, saisonnalité)
-- [ ] Multi-langues i18n
-- [ ] Mobile app React Native
+### Paiement
+- Acompte : 10% à la réservation
+- Solde : Total - acompte, débité à J+1
+- Caution : 500€ (en cas de dégâts)
+- Tous les paiements via Stripe
 
-### Phase 4 (Long terme)
-- [ ] Systèmes de reviews & ratings
-- [ ] Intégrations BI (analytics, revenue reports)
-- [ ] APIs partenaires (agences immobilières)
-- [ ] Gestion locataires LT (lease management)
+### Horaires standards
+| Paramètre | Défaut | Modifiable |
+|---|---|---|
+| **Heure d'arrivée** | 16h00 | ✅ Par appartement |
+| **Heure de départ** | 11h00 | ✅ Par appartement |
 
 ---
 
-## 11. Documents & Fichiers Clés
+## 📞 Contact & Support
 
-Lire dans cet ordre pour onboarding :
-1. **backend/README.md** - Architecture générale
-2. **backend/INSTALLATION.md** - Setup technique
-3. **backend/QUICKSTART.md** - Premier pas avec Postman
-4. **backend/SYNTHÈSE.md** - Résumé features
-5. **frontend/README.md** - Stack React
-6. **Ce fichier** - Vue globale technique
+- **Email :** dimolocation@gmail.com
+- **Téléphone :** +33 7 62 14 48 81
+- **Support clients :** Via plateforme + email/WhatsApp
 
 ---
 
-## 12. Contacts & Support
+## 📝 Notes importantes
 
-- **Repository** : https://github.com/resaendirect-web/apartment-booking
-- **Domaine** : resa-en-direct.fr
-- **Email Admin** : resaendirect@gmail.com
-- **Propriétaire** : À définir
-- **Développeur Lead** : IA Claude (orchestration Perplexity)
-
-
----
-
-## 13. ÉTAT D'IMPLÉMENTATION - PHASE 1 COMPLÉTÉE (08 Novembre 2025)
-
-### ✅ Phase 1 Backend - TERMINÉE À 100%
-
-#### Environnement Local Configuré
-
-**Infrastructure installée :**
-- Node.js v24.11.0 (LTS)
-- PostgreSQL 16 (localhost:5432)
-- Git avec authentification Google OAuth
-- npm 463 packages installés et vérifiés
-
-**Chemin projet local :**
-C:\Users\flori\Documents\Site_web_papa\apartment-booking\
-
-
-**Base de données PostgreSQL :**
-- Nom : `resa_en_direct`
-- User : `postgres`
-- Port : 5432
-- Status : ✅ Opérationnelle avec toutes les migrations appliquées
-
-#### Fichiers Backend Créés et Fonctionnels
-
-**Structure src/ :**
-backend/src/
-├── index.js ✅ Point d'entrée serveur (ES6 imports)
-├── app.js ✅ Configuration Express + middleware
-├── auth.js ✅ Middleware authentification JWT
-├── authController.js ✅ Inscription, connexion, logout
-├── authRoutes.js ✅ Routes /api/auth/*
-├── bookingController.js ✅ Logique réservations
-├── bookingRoutes.js ✅ Routes /api/bookings/*
-├── calendarController.js ✅ Synchronisation iCal
-├── calendarRoutes.js ✅ Routes /api/calendar/*
-├── propertyController.js ✅ Gestion appartements
-├── propertyRoutes.js ✅ Routes /api/properties/*
-└── healthController.js ✅ Health check endpoint
-
-**Configuration validée :**
-- `package.json` : Toutes dépendances installées
-- `schema.prisma` : Modèles de données complets (User, Property, Unit, Booking, Availability, CalendarFeed)
-- `.env` : Variables d'environnement configurées
-- `.gitignore` : Créé pour exclure node_modules, .env, logs
-
-#### Serveur Backend Opérationnel
-
-**Status :** ✅ **FONCTIONNEL**
-
-**Démarrage :**
-cd backend
-npm run dev
-
-**Sortie attendue :**
-Server running on http://localhost:5000
-
-
-**Endpoint de santé testé :**
-GET http://localhost:5000/api/health
-Response: {"status":"OK","message":"Server is running"}
-
-
-#### Repository GitHub Synchronisé
-
-**URL :** https://github.com/resaendirect-web/apartment-booking
-
-**Dernier commit :** `feat: ajout .gitignore pour exclure node_modules` (08 Nov 2025)
-
-**Branches :**
-- main (branche principale, protégée)
-
-**Authentification :** Google OAuth (fonctionnelle)
-
-### ⚠️ Problèmes Résolus Durant Phase 1
-
-#### 1. Corruption node_modules sur lecteur réseau
-**Symptôme :** `TAR_ENTRY_ERROR`, `EPERM operation not permitted`  
-**Cause :** Installation npm sur lecteur réseau H: avec buffers limités  
-**Solution :** Déplacement complet du projet vers `C:\Users\flori\Documents\Site_web_papa\`
-
-#### 2. PowerShell bloque l'exécution de scripts npm
-**Symptôme :** `l'exécution de scripts est désactivée sur ce système`  
-**Cause :** Politique de sécurité PowerShell Windows  
-**Solution :** Utilisation de l'invite de commandes classique (cmd.exe) au lieu de PowerShell
-
-#### 3. Erreur "Cannot find module ./lib/toDate"
-**Symptôme :** Crash au démarrage du serveur avec erreur module manquant  
-**Cause :** node_modules corrompu après installation échouée  
-**Solution :**
-npm cache clean --force
-rmdir /s /q node_modules
-del package-lock.json
-npm install
-
-
-#### 4. Git push échoue avec "Permission denied"
-**Symptôme :** Erreur 403, authentification rejetée  
-**Cause :** Anciennes credentials Windows en cache (mauvais utilisateur)  
-**Solution :** 
-- Suppression des credentials dans Gestionnaire d'identifications Windows
-- Utilisation de Google OAuth (authentification navigateur)
-
-### 🔧 Configuration Finale Validée
-
-#### Variables d'environnement (.env)
-
-Database
-DATABASE_URL="postgresql://postgres:MDPsitepapa@localhost:5432/resa_en_direct"
-
-Server
-PORT=5000
-NODE_ENV=development
-
-JWT Secrets
-JWT_SECRET="votre_secret_jwt_super_complexe_123456789"
-JWT_REFRESH_SECRET="votre_secret_refresh_super_complexe_987654321"
-
-Email SMTP (Gmail)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=resaendirect@gmail.com
-SMTP_PASSWORD=nhrz vugi pbwj wvka
-ADMIN_EMAIL=resaendirect@gmail.com
-
-
-#### package.json - Scripts opérationnels
-
-{
-"scripts": {
-"dev": "nodemon src/index.js",
-"start": "node src/index.js",
-"migrate": "npx prisma migrate dev",
-"seed": "npx prisma db seed"
-}
-}
-
-
-### 📋 Commandes Utiles Validées
-
-**Ouvrir terminal dans le bon dossier :**
-- Méthode 1 : Explorateur Windows → barre d'adresse → taper `cmd` → Entrée
-- Méthode 2 : Shift + Clic droit dans dossier → "Ouvrir dans le Terminal"
-
-**Démarrer le serveur backend :**
-cd C:\Users\flori\Documents\Site_web_papa\apartment-booking\backend
-npm run dev
-
-**Synchroniser avec GitHub :**
-cd C:\Users\flori\Documents\Site_web_papa\apartment-booking
-git add .
-git commit -m "votre message"
-git push
-
-(L'authentification se fait automatiquement via Google OAuth dans le navigateur)
-
-**Réinstaller node_modules en cas de problème :**
-cd backend
-npm cache clean --force
-rmdir /s /q node_modules
-del package-lock.json
-npm install
-
-
-### 🎯 Prochaines Étapes - Phase 2 : Frontend
-
-#### Objectifs Phase 2
-
-**À créer :**
-1. Structure frontend React + Vite
-2. Configuration TailwindCSS pour le styling
-3. Connexion API backend (proxy vers localhost:5000)
-4. Pages principales :
-   - Home (liste des appartements)
-   - Détail appartement
-   - Formulaire de réservation
-   - Dashboard admin
-
-**Technologies à installer :**
-- React 18
-- Vite (build tool)
-- React Router (navigation)
-- TailwindCSS (styling)
-- Axios (requêtes HTTP)
-- React Hook Form (formulaires)
-- Zustand ou Context API (state management)
-
-**Prérequis Frontend :**
-- [ ] Informations sur les appartements (noms, descriptions, prix)
-- [ ] Photos des appartements (ou structure prête pour les ajouter)
-- [ ] Logo et couleurs de marque
-- [ ] Politique d'annulation détaillée
-- [ ] Horaires check-in/check-out standards
-
-#### Commandes prévues pour Phase 2
-cd C:\Users\flori\Documents\Site_web_papa\apartment-booking
-npm create vite@latest frontend -- --template react
-cd frontend
-npm install
-npm install react-router-dom tailwindcss axios react-hook-form zustand
-npm run dev
-
-
-### 📊 Métriques Phase 1
-
-**Durée totale :** ~7 heures (avec résolution de problèmes)  
-**Fichiers créés :** 25+ (backend complet)  
-**Lignes de code :** ~2000 (backend + configuration)  
-**Commits GitHub :** 9  
-**Tests réussis :** 
-- ✅ Serveur démarre sans erreur
-- ✅ Endpoint /api/health répond correctement
-- ✅ Base de données connectée
-- ✅ Git synchronisé avec GitHub
-
-### 🔐 Sécurité Validée
-
-- ✅ Mots de passe hashés avec bcryptjs
-- ✅ JWT access/refresh tokens configurés
-- ✅ Variables sensibles dans .env (exclus de Git)
-- ✅ Helmet + CORS middleware activés
-- ✅ Validation Zod préparée pour toutes les entrées
-
-### 📖 Documentation Complétée
-
-**Fichiers créés :**
-- ✅ backend/README.md
-- ✅ backend/INSTALLATION.md
-- ✅ backend/QUICKSTART.md
-- ✅ backend/INVENTAIRE.md
-- ✅ backend/SYNTHESE.md
-- ✅ backend/STRUCTURE.txt
-- ✅ TECHNIQUE-DETAIL.md (ce fichier)
+1. **Non-développeur :** Toutes les sections peuvent être gérées via le dashboard admin, pas besoin d'accès code
+2. **Synchronisation :** Assurez-vous d'avoir les liens iCal d'Airbnb et Booking pour chaque appartement
+3. **Conformité légale :** La taxe de séjour est obligatoire - tableau de synthèse nécessaire pour déclarations État
+4. **Sécurité paiement :** Tous les paiements via Stripe (PCI compliant)
+5. **Data RGPD :** Politique confidentialité requise avant lancement
 
 ---
 
-**Date de dernière mise à jour :** 08 Novembre 2025, 23h00 CET  
-**Status global :** Phase 1 Backend ✅ COMPLÉTÉE | Phase 2 Frontend ⏳ À DÉMARRER
-
+**Version :** 1.0  
+**Dernière mise à jour :** 09/11/2025  
+**Auteur technique :** Ingénieur projet IMMOSTRASBOURG
